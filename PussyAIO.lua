@@ -1,4 +1,4 @@
-local Heroes = {"Yuumi","Rakan","Nidalee","Ryze","XinZhao","Kassadin","Veigar","Tristana","Warwick","Neeko","Cassiopeia","Malzahar","Zyra","Sylas","Kayle","Morgana","Ekko","Xerath","Sona","Ahri"}
+local Heroes = {"Braum", "Yuumi","Rakan","Nidalee","Ryze","XinZhao","Kassadin","Veigar","Tristana","Warwick","Neeko","Cassiopeia","Malzahar","Zyra","Sylas","Kayle","Morgana","Ekko","Xerath","Sona","Ahri"}
 if not table.contains(Heroes, myHero.charName) then return end
 
 
@@ -13509,6 +13509,250 @@ end
 
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+class "Braum"
+
+if not FileExist(COMMON_PATH .. "GamsteronPrediction.lua") then
+	print("GsoPred. installed Press 2x F6")
+	DownloadFileAsync("https://raw.githubusercontent.com/gamsteron/GOS-External/master/Common/GamsteronPrediction.lua", COMMON_PATH .. "GamsteronPrediction.lua", function() end)
+	while not FileExist(COMMON_PATH .. "GamsteronPrediction.lua") do end
+end
+    
+require('GamsteronPrediction')
+
+local QData =
+{
+Type = _G.SPELLTYPE_LINE, Delay = 0.25, Radius = 70, Range = 1000, Speed = 1700, Collision = true, MaxCollision = 0, CollisionTypes = {_G.COLLISION_MINION,_G.COLLISION_YASUOWALL}
+}
+
+local RData =
+{
+Type = _G.SPELLTYPE_LINE, Delay = 0.5, Radius = 70, Range = 1250, Speed = 1400, Collision = true, MaxCollision = 0, CollisionTypes = {_G.COLLISION_YASUOWALL}
+}
+
+function Braum:__init()
+	Q = {ready = false, range = 1000, radius = 235, speed = 1000, delay = 0.25, type = "circular"}
+	W = {ready = false, range = 650,}
+	R = {ready = false, range = 1250,}
+	self.Enemies = {}
+	self.Allies = {}
+	for i = 1,Game.HeroCount() do
+		local hero = Game.Hero(i)
+		if hero.isAlly  then
+			self.Allies[hero.handle] = hero
+		else
+			self.Enemies[hero.handle] = hero
+		end	
+	end	
+	self.lastTick = 0
+	self.SelectedTarget = nil
+	self:LoadMenu()
+	
+	if _G.EOWLoaded then
+		Orb = 1
+	elseif _G.SDK and _G.SDK.Orbwalker then
+		Orb = 2
+	elseif _G.gsoSDK then
+		Orb = 4			
+	end
+	
+	Callback.Add("Tick",function() self:Tick() end)
+	Callback.Add("Draw",function() self:Draw() end)
+
+end
+
+
+function Braum:LoadMenu()
+	self.Menu = MenuElement( {id = "Braum", name = "PussyBraum", type = MENU})
+	self.Menu:MenuElement({id = "Key", name = "Key Settings", type = MENU})
+	self.Menu.Key:MenuElement({id = "Combo",name = "Combo", key = 32})
+	self.Menu.Key:MenuElement({id = "Harass",name = "Harass", key = string.byte("C")})
+
+	self.Menu:MenuElement({type = MENU, id = "Qset", name = "Q Settings"})
+	self.Menu.Qset:MenuElement({id = "Combo",name = "Use in Combo", value = true })
+	self.Menu.Qset:MenuElement({id = "Harass", name = "Use in Harass", value = true})
+	self.Menu.Qset:MenuElement({id = "AutoQ", name = "Auto Q on CC'd enemy",value = true})
+	self.Menu.Qset:MenuElement({id = "KillSteal", name = "KillSteal",value = true})
+	
+	self.Menu:MenuElement({id = "Wset", name = "W Settings", type = MENU})
+	self.Menu.Wset:MenuElement({id = "AutoW", name = "Auto W on CC'd ally",value = true})
+	self.Menu.Wset:MenuElement({id = "AllyHp", name = "Ally HP Percent",value = 50, min = 1, max = 100,step = 1})
+	
+	self.Menu:MenuElement({id = "Rset", name = "R Settings",type = MENU})
+	self.Menu.Rset:MenuElement({id = "AutoR", name = "Enable Auto R",value = true})
+	self.Menu.Rset:MenuElement({id = "RHit", name = "Min enemies hit",value = 3, min = 1, max = 5,step = 1})
+	self.Menu.Rset:MenuElement({id = "KillSteal", name = "KillSteal",value = true})	
+
+	self.Menu:MenuElement({type = MENU, id = "Draw",name = "> Draw Settings"})
+	self.Menu.Draw:MenuElement({id = "Q", name = "Draw Q Range", value = true})
+	self.Menu.Draw:MenuElement({id = "W", name = "Draw W Range", value = true})
+	self.Menu.Draw:MenuElement({id = "R", name = "Draw R Range", value = true})
+end
+
+
+function Braum:Tick()
+	if myHero.dead == false and Game.IsChatOpen() == false then
+	local Mode = GetMode()
+		self:KillSteal()
+		if Mode == "Combo" then
+			if self.Menu.Key.Combo:Value() then
+				self:Combo()
+			end
+		elseif Mode == "Harass" then
+			if self.Menu.Key.Harass:Value() then
+				self:Harass()
+			end
+		elseif Mode == "Clear" then
+
+		elseif Mode == "Flee" then
+		
+		end
+		if Ready(_R) then
+			self:AutoR()
+		end
+		if Ready(_Q) then
+			self:AutoQ()
+		end
+		if Ready(_W) then
+			self:AutoW()
+		end
+	end
+end
+
+local function isValidTarget(obj,range)
+	range = range or math.huge
+	return obj ~= nil and obj.valid and obj.visible and not obj.dead and obj.isTargetable and obj.distance <= range
+end
+
+function Braum:CastQ(unit)
+	if not unit then return end
+	local pred = GetGamsteronPrediction(unit, QData, myHero)
+	if pred.Hitchance >= _G.HITCHANCE_HIGH then
+		CastSpell(HK_Q,pred.CastPosition)
+	end
+end
+
+function Braum:Combo()
+	local target = GetTarget(Q.range)     	
+	if target == nil then return end
+	if IsValid(target) then	
+		local pred = GetGamsteronPrediction(target, QData, myHero)
+		if pred.Hitchance >= _G.HITCHANCE_HIGH then
+				Control.CastSpell(HK_Q,target.pos)
+				return
+		end	
+	end
+end
+
+function Braum:Harass()
+	local target = GetTarget(Q.range)     	
+	if target == nil then return end
+	if IsValid(target) then	
+		local pred = GetGamsteronPrediction(target, QData, myHero)
+		if pred.Hitchance >= _G.HITCHANCE_HIGH then
+				Control.CastSpell(HK_Q,target.pos)
+				return
+		end	
+	end
+end
+
+function Braum:AutoW()
+	if (not Ready(_W) or not self.Menu.Wset.AutoW:Value())then return end
+	for i, ally in pairs(self.Allies) do
+		if isValidTarget(ally,W.range) then
+			if not ally.isMe then
+				if IsImmobileTarget(ally) then
+					Control.CastSpell(HK_W,ally.pos)
+					return
+				end	
+			end			
+		end
+	end
+end	
+
+function Braum:AutoQ()
+	if (not Ready(_Q) or not self.Menu.Qset.AutoQ:Value())then return end
+	for i, enemy in pairs(self.Enemies) do
+		if isValidTarget(enemy,Q.range) and IsImmobileTarget(enemy) then
+			local pred = GetGamsteronPrediction(enemy, QData, myHero)
+			if pred.Hitchance >= _G.HITCHANCE_HIGH then
+				Control.CastSpell(HK_Q,target.pos)
+				return
+			end	
+		end
+	end
+end	
+
+function Braum:AutoR()
+	if (not Ready(_R) or not self.Menu.Rset.AutoR:Value())then return end
+	for i, enemy in pairs(self.Enemies) do
+		if isValidTarget(enemy,R.range) and IsImmobileTarget(enemy) then
+			local pred = GetGamsteronPrediction(enemy, RData, myHero)
+			if pred.Hitchance >= _G.HITCHANCE_HIGH then
+				if EnemiesNear(target.pos,140) >= self.Menu.Rset.RHit:Value() then
+					Control.CastSpell(HK_R,target.pos)
+					return
+				end
+			end	
+		end
+	end
+end
+
+function Braum:KillSteal()
+	local target = GetTarget(1250)
+	if target == nil then return end
+	local hp = target.health
+	local RDmg = getdmg("Q", target)
+	local QDmg = getdmg("R", target)
+	if IsValid(target, 1250) then
+		print("KS Target:"..target.charName.." | Health: "..target.health.." | Qdmg: "..QDmg.." | Rdmg: "..RDmg)
+		if self.Menu.Qset.KillSteal:Value() and Ready(_Q) then
+			print("Q ready")
+			if QDmg >= hp and myHero.pos:DistanceTo(target.pos) <= 1000 then
+				print("Q ready and killable")
+				local pred = GetGamsteronPrediction(target, QData, myHero)
+				if pred.Hitchance >= _G.HITCHANCE_HIGH then
+					Control.CastSpell(HK_Q,target.pos)
+					return
+				end				
+			end				
+		end
+	
+		if self.Menu.Rset.KillSteal:Value() and Ready(_R) then
+			if RDmg >= hp and myHero.pos:DistanceTo(target.pos) <= 1250 then
+				local pred = GetGamsteronPrediction(target, RData, myHero)
+				if pred.Hitchance >= _G.HITCHANCE_HIGH then
+					Control.CastSpell(HK_R,target.pos)
+					return
+				end				
+			end				
+		end
+	end
+end	
+
+
+function Braum:Draw()
+	if myHero.dead then return end
+
+	if self.Menu.Draw.Q:Value() then
+		local qcolor = Ready(_Q) and  Draw.Color(189, 183, 107, 255) or Draw.Color(240,255,0,0)
+		Draw.Circle(Vector(myHero.pos),Q.range,1,qcolor)
+	end
+	if self.Menu.Draw.W:Value() then
+		local wcolor = Ready(_W) and  Draw.Color(240,30,144,255) or Draw.Color(240,255,0,0)
+		Draw.Circle(Vector(myHero.pos),W.range,1,wcolor)
+	end
+	if self.Menu.Draw.R:Value() then
+		local ecolor = Ready(_E) and  Draw.Color(233, 150, 122, 255) or Draw.Color(240,255,0,0)
+		Draw.Circle(Vector(myHero.pos),R.range,1,ecolor)
+	end
+end
+
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
 --Dmg Lib
 
 
@@ -13704,6 +13948,11 @@ local DamageLibTable = {
     {Slot = "W", Stage = 2, DamageType = 2, Damage = function(source, target, level) return ({12, 19.5, 27, 34.5, 42})[level] + 0.09 * source.ap end},
     {Slot = "E", Stage = 1, DamageType = 2, Damage = function(source, target, level) return ({60, 90, 120, 150, 180})[level] + 0.40 * source.ap end},
     {Slot = "R", Stage = 1, DamageType = 2, Damage = function(source, target, level) return ({60, 90, 120})[level] + 0.35 * source.ap end},
+  },
+  
+	["Braum"] = {
+    {Slot = "Q", Stage = 1, DamageType = 2, Damage = function(source, target, level) return ({60, 105, 150, 195, 240})[level] + 0.025 * source.maxHealth end},
+    {Slot = "R", Stage = 1, DamageType = 2, Damage = function(source, target, level) return ({150, 250, 350})[level] + 0.6 * source.ap end},
   },
 
 	["Ekko"] = {  
