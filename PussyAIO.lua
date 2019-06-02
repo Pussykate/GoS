@@ -1757,7 +1757,7 @@ end
 
 
 function Ahri:Tick()
-	if myHero.dead == false and Game.IsChatOpen() == false and (ExtLibEvade and ExtLibEvade.Evading == false) then
+	if myHero.dead == false and Game.IsChatOpen() == false and (ExtLibEvade == nil or ExtLibEvade.Evading == false) then
 	self:KS()
 	self:CC()
 	self:AutoR()	
